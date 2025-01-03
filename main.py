@@ -1,84 +1,73 @@
-import pandas as pd
-from sklearn.preprocessing import MinMaxScaler
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-
 import numpy as np
-from sklearn import datasets
-import matplotlib.pyplot as plt
-from matplotlib import cm
-from matplotlib.colors import ListedColormap, BoundaryNorm
-import matplotlib.patches as patches
-from scipy.special import expit
-import itertools
-from sklearn import svm, datasets
-
-from sklearn.svm import SVC
-from sklearn.utils import shuffle
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import confusion_matrix, classification_report,accuracy_score
-
-from sklearn.ensemble import BaggingClassifier
-from sklearn.ensemble import AdaBoostClassifier
-
-from sklearn import tree
-from sklearn.ensemble import RandomForestClassifier
-
-
-# Extract images and labels
-images = dataset.imgs  # Numpy array of images
-labels = dataset.labels  # Corresponding labels
-
-# Flatten the image data (optional, depending on your use case)
-# If you want each pixel as a column, flatten the images.
-# Otherwise, keep them as arrays.
-flattened_images = images.reshape(images.shape[0], -1)
-
-# Create a dictionary to hold the data
-data_dict = {
-    'image': list(flattened_images),  # or images if not flattening
-    'label': labels.flatten()  # Ensure labels are a 1D array
-}
-
-# Convert the dictionary to a Pandas DataFrame
-df = pd.DataFrame(data_dict)
-
-# Assuming df is your DataFrame where each row contains a flattened image and label.
-# Convert 'image' column to numpy array if not already done
-x = np.array(df['image'].tolist())  # Convert list of pixels to numpy array
-y = np.array(df['label'])  # Labels are already in an appropriate format
-
-from sklearn.datasets import load_iris
+import cv2
+from skimage.feature import hog
+from imblearn.under_sampling import RandomUnderSampler
 from sklearn.model_selection import train_test_split
-from sklearn.decomposition import PCA
-from scipy.stats import yeojohnson
-from sklearn.preprocessing import StandardScaler
+from sklearn.neighbors import KNeighborsClassifier
+import joblib
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+from sklearn.metrics import classification_report, confusion_matrix
 
-# from sklearn import svm
+breast_dat = np.load('breastmnist_224.npz')
+breast_train = breast_dat['train_images']
+breast_val = breast_dat['val_immages']
+breast_test = breast_dat['test_images']
 
-X_train,X_test,y_train,y_test=train_test_split(x,y,test_size=0.25,random_state=3) 
+def preprocess_pixels(images):
+    # If grayscale, images.shape = (num_samples, H, W)
+    # If RGB, images.shape = (num_samples, H, W, 3)
+    num_samples = images.shape[0]
+    flattened_images = images.reshape(num_samples, -1)  # Flatten
+    normalized_images = flattened_images / 255.0  # Normalize pixel values
+    return normalized_images
 
-scaler = StandardScaler()
-X_train = scaler.fit_transform(X_train)
-X_test = scaler.transform(X_test)
+def extract_hog_features(images):
+    features = []
+    for img in images:
+        feature = hog(img, orientations=9, pixels_per_cell=(8, 8), 
+                      cells_per_block=(2, 2), block_norm='L2-Hys')
+        features.append(feature)
+    return np.array(features)
 
-pca = PCA(n_components=0.71)
-X_train = pca.fit_transform(X_train)
-X_test = pca.transform(X_test)
+def train_binary_classification(images, labels):
+    resized_images = []
 
-#Import svm model
-from sklearn import svm
+    for img in images:
+        resized_img = cv2.resize(img, (128, 128))
+        resized_images.append(resized_img)
 
-#Create a svm Classifier
-clf = svm.SVC(kernel='rbf', C=1.0, gamma='scale') # Linear Kernel
+    resized_images = np.array(resized_images)
 
-#Train the model using the training sets
-clf.fit(X_train, y_train)
+    hog_features = extract_hog_features(resized_images)
 
-#Predict the response for test dataset
-y_pred = clf.predict(X_test)
+    X = preprocess_pixels(hog_features)
+    y = labels
 
+    undersampler = RandomUnderSampler(random_state=42)
+    X_resampled, y_resampled = undersampler.fit_resample(X, y)
 
-print(y_pred)
+    X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled, test_size=0.1, random_state=42)
 
-print("Accuracy:", accuracy_score(y_test, y_pred))
+    knn = KNeighborsClassifier(n_neighbors=3, weights='uniform')
+
+    knn.fit(X_train, y_train)
+
+    joblib.dump(knn, 'knn_model.pkl')
+
+    joblib.dump(knn, 'knn_model.pkl')
+
+    # Define k-fold cross-validation
+    kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)  # 5 folds
+
+    # Perform cross-validation
+    scores = cross_val_score(knn, X, y, cv=kfold, scoring='accuracy')
+
+    # Display results
+    print("Cross-validation scores:", scores)
+    print("Mean accuracy:", scores.mean())
+
+    # Predict and evaluate
+    y_pred = knn.predict(X_test)
+    print(classification_report(y_test, y_pred))
+    print(confusion_matrix(y_test, y_pred))
+
