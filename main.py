@@ -19,7 +19,7 @@ from tensorflow.keras.utils import to_categorical
 
 from tensorflow.keras.models import load_model
 
-breast_dat = np.load('breastmnist_224.npz')
+# breast_dat = np.load('breastmnist_224.npz')
 breast_train = breast_dat['train_images']
 breast_val = breast_dat['val_immages']
 breast_test = breast_dat['test_images']
@@ -81,7 +81,7 @@ def train_binary_classification(images, labels):
 
 
 def inference_binary_classification(image):
-    knn_loaded = joblib.load('knn_model.pkl')
+    # knn_loaded = joblib.load('knn_model.pkl')
 
     img_path = breast_train['test_images'] [0]
 
@@ -165,7 +165,7 @@ def load_and_preprocess_image(image):
 
 
 def inference_multi_classification(image):
-    model = load_model('trained_model.h5')
+    # model = load_model('trained_model.h5')
 
     image_path = blood['test_images'][n]
 
