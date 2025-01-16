@@ -1,12 +1,13 @@
-import numpy as np
+from sklearn.svm import SVC
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.model_selection import cross_val_score
+from sklearn.decomposition import PCA
+from imblearn.over_sampling import ADASYN
 import cv2
 from skimage.feature import hog
-from imblearn.under_sampling import RandomUnderSampler
-from sklearn.model_selection import train_test_split
-from sklearn.neighbors import KNeighborsClassifier
 import joblib
-from sklearn.model_selection import cross_val_score, StratifiedKFold
-from sklearn.metrics import classification_report, confusion_matrix
+import numpy as np
 
 from tensorflow.keras.applications import ResNet50
 from tensorflow.keras.models import Model
@@ -19,20 +20,28 @@ from tensorflow.keras.utils import to_categorical
 
 from tensorflow.keras.models import load_model
 
-# breast_dat = np.load('breastmnist_224.npz')
-breast_train = breast_dat['train_images']
-breast_val = breast_dat['val_immages']
-breast_test = breast_dat['test_images']
+breast = np.load('./Datasets/breastmnist_224.npz')
+blood = np.load('./Datasets/bloodmnist_224.npz')
+
+pca = joblib.load('./A/pca_model2.pkl')
+svm = joblib.load('./A/svm_model.pkl')
+
+model = load_model('./B/trained_model.h5')
+
 
 def preprocess_pixels(images):
-
+    #shape[0] is the number of samples
     num_samples = images.shape[0]
+    #flatten to 1D array of pixel intensities
     flattened_images = images.reshape(num_samples, -1) 
+    #normalise the flattened images
     normalized_images = flattened_images / 255.0 
     return normalized_images
 
 def extract_hog_features(images):
+    #new features array
     features = []
+    #extract histogram of oriented gradients from each image
     for img in images:
         feature = hog(img, orientations=9, pixels_per_cell=(8, 8), 
                       cells_per_block=(2, 2), block_norm='L2-Hys')
@@ -40,74 +49,99 @@ def extract_hog_features(images):
     return np.array(features)
 
 def train_binary_classification(images, labels):
-    resized_images = []
+    #images are selected from BreastMNIST training images
+    images = breast['train_images']     
 
+    #images are resized to 128x128 from 224x224 (or whichever size you choose to download)
+    resized_images = []                 
+
+    #opencv as a simple tool to resize images appended to new resized_images array
     for img in images:
-        resized_img = cv2.resize(img, (224, 224))
+        resized_img = cv2.resize(img, (128, 128))
         resized_images.append(resized_img)
 
     resized_images = np.array(resized_images)
 
+    #hog features extracted from each image
     hog_features = extract_hog_features(resized_images)
 
+    #hog features are preprocessed
     X = preprocess_pixels(hog_features)
-    y = labels
+    y = breast['train_labels']
 
-    undersampler = RandomUnderSampler(random_state=42)
-    X_resampled, y_resampled = undersampler.fit_resample(X, y)
+    #use adasyn to resample the minority class to match the number of samples in the majority class
+    adasyn = ADASYN(random_state=42)
+    X_resampled, y_resampled = adasyn.fit_resample(X, y)
 
-    X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled, test_size=0.1, random_state=42)
+    #split the training data into a training and testing set based on preprocessed data into 80:20 ratio
+    X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled, test_size=0.2, random_state=42)
 
-    knn = KNeighborsClassifier(n_neighbors=3, weights='uniform')
+    #principle components analysis to extract 100 components that capture the most variance to simplify training
+    pca = PCA(n_components=100)
+    X_train_pca = pca.fit_transform(X_train)
+    X_test_pca = pca.transform(X_test)
 
-    knn.fit(X_train, y_train)
+    #store the pca model if necessary
+    # joblib.dump(pca, 'pca_model2.pkl')
 
-    # joblib.dump(knn, 'knn_model.pkl')
+    #create a polynomial kernel based SVM with the following hyperparameters
+    svm = SVC(kernel='poly', degree=3, gamma='scale', coef0=2, random_state=42)
 
-    # Define k-fold cross-validation
-    kfold = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)  # 5 folds
+    #train the SVM model on the training set
+    svm.fit(X_train_pca, y_train)
 
-    # Perform cross-validation
-    scores = cross_val_score(knn, X, y, cv=kfold, scoring='accuracy')
+    #store the SVM model
+    # joblib.dump(svm, 'svm_model.pkl')
 
-    # Display results
-    print("Cross-validation scores:", scores)
-    print("Mean accuracy:", scores.mean())
-
-    # Predict and evaluate
-    y_pred = knn.predict(X_test)
-    print(classification_report(y_test, y_pred))
-    print(confusion_matrix(y_test, y_pred))
-
-
-def inference_binary_classification(image):
-    # knn_loaded = joblib.load('knn_model.pkl')
-
-    img_path = breast_train['test_images'] [0]
-
-    img_path = cv2.resize(img_path, (224, 224))
-
-    img_resized = img_path
-
-    hog_feature = extract_hog_features([img_resized])  # A single image
-
-    X = preprocess_pixels(hog_feature)
-
-    prediction = knn_loaded.predict(X)
-
-    print(f"Predicted class: {prediction}")
-
-    print("Actual label: ", breast_train['test_labels'][0])
+    #use the svm model to predict on the assigned test set
+    y_pred = svm.predict(X_test_pca)
 
 
+def preprocess_image(image_path):
+    resized_img = cv2.resize(image_path, (128, 128))
+    
+    # Extract HOG features
+    feature = hog(resized_img, orientations=9, pixels_per_cell=(8, 8),
+                cells_per_block=(2, 2), block_norm='L2-Hys')
+    
+    # Return the HOG features as a flattened array
+    return feature.reshape(1, -1)
 
-def train_multi_classification(images):
+
+def predict_image(image_path):
+    # Preprocess the image to extract features
+    features = preprocess_image(image_path)
+    
+    # Ensure the PCA transformation aligns with what the SVM expects
+    features_pca = pca.transform(features)  # This should reduce features to 100
+    
+    # Predict the class using the loaded SVM model
+    prediction = svm.predict(features_pca)
+    
+    return prediction[0]
+
+
+def inference_binary_classification(min, max):
+    count = 0
+    total = max-min
+
+    for n in range (min, max):
+        image_path = breast['test_images'][n]  # Provide the path to the image
+        predicted_class = predict_image(image_path)
+        print(f"Predicted class: {predicted_class}")
+        print(f"Actual class: {breast['test_labels'][n]}")
+        if breast['test_labels'][n] == predicted_class:
+            count+=1
+
+    print(f"Accuracy: {count/total*100}")
+
+
+
+def train_multi_classification():
     x = blood['test_images']
     y = blood['test_labels']
 
-    X_train, X_eval, y_train, y_eval = train_test_split(
-        x, y, test_size=0.3, random_state=42, stratify=y
-    )
+    X_train, X_eval, y_train, y_eval = train_test_split(x, y, test_size=0.3, random_state=42, stratify=y)
 
     # One-hot encoding of labels
     y_train = to_categorical(y_train, num_classes=8)
@@ -143,15 +177,15 @@ def train_multi_classification(images):
     ]
 
     history = model.fit(
-        datagen.flow(X_train, y_train, batch_size=32),
+        datagen.flow(X_train, y_train, batch_size=16),
         validation_data=(X_eval, y_eval),
-        epochs=10, 
+        epochs=2, 
         callbacks=callbacks
     )
 
     # Evaluate on the evaluation subset
-    loss, acc = model.evaluate(X_eval, y_eval)
-    print(f"Evaluation Accuracy: {acc * 100:.2f}%")
+    # loss, acc = model.evaluate(X_eval, y_eval)
+    # print(f"Evaluation Accuracy: {acc * 100:.2f}%")
 
 
 def load_and_preprocess_image(image):
@@ -164,16 +198,32 @@ def load_and_preprocess_image(image):
     return image
 
 
-def inference_multi_classification(image):
-    # model = load_model('trained_model.h5')
+def inference_multi_classification(min, max):
+    count = 0
+    total = max-min
 
-    image_path = blood['test_images'][n]
+    for n in range(min,max):
 
-    # Preprocess the image
-    input_image = load_and_preprocess_image(image_path)
+    # Example image path
+        image_path = blood['test_images'][n]
 
-    # Make a prediction
-    predictions = model.predict(input_image)
-    predicted_class = np.argmax(predictions)
-    print(f"Predicted class: {predicted_class}")
-    print(f"Actual label: {blood['test_labels'][n]}")
+        # Preprocess the image
+        input_image = load_and_preprocess_image(image_path)
+
+        # Make a prediction
+        predictions = model.predict(input_image)
+        predicted_class = np.argmax(predictions)
+        print(f"Predicted class: {predicted_class}")
+        print(f"Actual label: {blood['test_labels'][n]}")
+        if (predicted_class == blood['test_labels'][n]): 
+            count+=1
+
+    print(f"Accuracy = {count/total*100}%")
+
+
+def main():
+    inference_binary_classification(0,30)
+    # inference_multi_classification(0,3)
+
+if __name__ == "__main__":
+    main()
