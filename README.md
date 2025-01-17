@@ -15,7 +15,7 @@ The necessary packages include:
 - imblearn
 - cv2
 - skimage
-- joblib (optional if you want to save models after training)
+- joblib
 - numpy
 - tensorflow
 
