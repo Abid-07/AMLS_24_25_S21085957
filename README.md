@@ -30,8 +30,8 @@ Folders A and B contain the necessary trained models to conduct inference for ta
 Similarly for B, the content include 'trained_model.h5' used for inference for task B, multi-classification.
 
 The main.py file is constructed such that the user may choose which task to run between:
-- train_binary_classifier
-- inference_binary_classifier
+- train_binary_classification
+- inference_binary_classification
 - train_multi_classification
 - inference_multi_classification
 
